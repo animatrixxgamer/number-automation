@@ -1,0 +1,19 @@
+# Telegram session credentials — never commit these
+*.session
+*.session-journal
+sessions/
+
+# WhatsApp linked-device credentials — never commit these
+wa-sessions/
+
+# Node
+node_modules/
+
+# Secrets
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/

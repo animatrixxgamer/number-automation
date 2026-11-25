@@ -1,0 +1,19 @@
+{
+  "name": "number-automation",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Local CLIs to log in to your own Telegram and WhatsApp accounts",
+  "scripts": {
+    "wa:login": "node wa_login.js",
+    "wa:send": "node wa_send.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "^6.7.24",
+    "pino": "^9.5.0",
+    "qrcode-terminal": "^0.12.0"
+  }
+}
