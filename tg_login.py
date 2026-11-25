@@ -132,6 +132,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=session_label,
         help="delete one saved session after you confirm; nothing secret is printed",
     )
+    actions.add_argument(
+        "--logout",
+        metavar="LABEL",
+        type=session_label,
+        help="end one session on Telegram (removes this PC from Devices), then "
+        "delete the saved file; asks first and prints nothing secret",
+    )
     return parser.parse_args(argv)
 
 
@@ -171,10 +178,10 @@ def list_sessions() -> None:
     for path in files:
         print(f"  {path.stem:<{width}}  {session_state(path)}")
     print(
-        "\nReuse one with --session <label>, drop one with --remove <label>. "
-        "Only labels and status are shown; session keys are never printed. A "
-        "session revoked from another device can still look signed in here "
-        "until it is used."
+        "\nReuse one with --session <label>, drop one with --remove <label>, or "
+        "end it on Telegram and drop it with --logout <label>. Only labels and "
+        "status are shown; session keys are never printed. A session revoked "
+        "from another device can still look signed in here until it is used."
     )
 
 
@@ -207,6 +214,62 @@ def remove_session(label: str) -> None:
             item.unlink()
         except OSError as exc:
             sys.exit(f"Could not delete {item}: {exc}")
+    print(f"Deleted session '{label}'. No login data was printed.")
+
+
+async def logout_session(label: str) -> None:
+    """End one session on Telegram itself, then delete the local copy."""
+    path = SESSION_DIR / f"{label}.session"
+    journal = Path(f"{path}-journal")
+    if not path.exists():
+        print(f"No saved Telegram session named '{label}' in {SESSION_DIR}/.")
+        print("See what is saved with: python3 tg_login.py --list")
+        return
+
+    api_id, api_hash = get_credentials()
+    status = session_state(path)
+    print(f"Session '{label}' ({status}) will be logged out and deleted:")
+    print(f"  {path}")
+    print(
+        "This ends the session on Telegram itself: this PC disappears from "
+        "Settings -> Devices, and this login stops working anywhere it is used."
+    )
+    if prompt(f"Log out and delete '{label}'? type 'yes': ").lower() != "yes":
+        print("Nothing deleted.")
+        return
+
+    client = TelegramClient(str(path), api_id, api_hash)
+    try:
+        await client.connect()
+    except (sqlite3.Error, OSError) as exc:
+        sys.exit(f"Could not open the saved session: {exc}")
+
+    try:
+        if await client.is_user_authorized():
+            await client.log_out()  # Telethon deletes its own session file here
+            print("Logged out on Telegram; this PC is no longer a listed device.")
+        else:
+            print("This session was already not signed in; nothing to end on Telegram.")
+    except errors.AuthKeyUnregisteredError:
+        print("Telegram says this session was already gone; nothing to end there.")
+    except errors.FloodWaitError as exc:
+        await sleep_flood(exc, "logging out")
+        print("Nothing deleted; run --logout again after the wait.")
+        return
+    except errors.RPCError as exc:
+        print(f"Telegram error: {type(exc).__name__}: {exc}")
+        print("Nothing deleted; the session on this PC is unchanged.")
+        return
+    finally:
+        await client.disconnect()
+
+    # log_out() usually removed the file already; drop anything left behind.
+    for item in (journal, path):
+        if item.exists():
+            try:
+                item.unlink()
+            except OSError as exc:
+                sys.exit(f"Could not delete {item}: {exc}")
     print(f"Deleted session '{label}'. No login data was printed.")
 
 
@@ -387,6 +450,9 @@ async def main() -> None:
         return
     if args.remove:
         remove_session(args.remove)
+        return
+    if args.logout:
+        await logout_session(args.logout)
         return
 
     api_id, api_hash = get_credentials()

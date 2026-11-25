@@ -109,23 +109,24 @@ export async function listSessions() {
     console.log(`  ${label.padEnd(width)}  ${status}`)
   }
   console.log(
-    '\nReuse one with --session <label>, drop one with --remove <label>. Only ' +
-      'labels and status are shown; credentials are never printed.',
+    '\nReuse one with --session <label>, drop one with --remove <label>, or ' +
+      'unlink the device and drop it with --logout <label>. Only labels and ' +
+      'status are shown; credentials are never printed.',
   )
 }
 
-/** Pull `--remove <label>` (or `--remove=<label>`) out of argv. */
-function takeRemove(argv) {
+/** Pull `--remove <label>` / `--logout <label>` (also `--flag=label`) out of argv. */
+function takeOption(argv, flag) {
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i]
-    if (arg === '--remove') {
+    if (arg === flag) {
       const label = argv[i + 1]
-      if (!label) throw new Error('--remove needs a label, e.g. --remove work')
+      if (!label) throw new Error(`${flag} needs a label, e.g. ${flag} work`)
       return label
     }
-    if (arg.startsWith('--remove=')) {
-      const label = arg.slice('--remove='.length)
-      if (!label) throw new Error('--remove needs a label, e.g. --remove work')
+    if (arg.startsWith(`${flag}=`)) {
+      const label = arg.slice(flag.length + 1)
+      if (!label) throw new Error(`${flag} needs a label, e.g. ${flag} work`)
       return label
     }
   }
@@ -158,6 +159,87 @@ export async function removeSession(label) {
     console.log('Nothing deleted.')
     return
   }
+  await rm(dir, { recursive: true, force: true })
+  console.log(`Deleted session '${label}'. No credentials were printed.`)
+}
+
+/** Resolve once WhatsApp is connected, or reject if it closes first. */
+function waitForOpen(sock, timeoutMs = 60_000) {
+  return new Promise((resolve, reject) => {
+    const done = (err) => {
+      clearTimeout(timer)
+      sock.ev.off('connection.update', onUpdate)
+      if (err) reject(err)
+      else resolve()
+    }
+    const timer = setTimeout(
+      () => done(new Error('timed out waiting for WhatsApp to connect')),
+      timeoutMs,
+    )
+    const onUpdate = ({ connection, lastDisconnect }) => {
+      if (connection === 'open') done()
+      else if (connection === 'close') {
+        done(new Error(lastDisconnect?.error?.message || 'connection closed'))
+      }
+    }
+    sock.ev.on('connection.update', onUpdate)
+  })
+}
+
+/**
+ * Unlink this PC on WhatsApp itself, then delete the saved session directory.
+ * If the unlink fails the files are kept: deleting them would leave a linked
+ * device on the account with no local way to remove it.
+ */
+export async function logoutSession(label) {
+  const dir = sessionDir(label)
+  let entries
+  try {
+    entries = await readdir(dir)
+  } catch (err) {
+    if (err.code !== 'ENOENT') throw err
+    console.log(`No saved WhatsApp session named '${label}' in ${SESSIONS_ROOT}.`)
+    console.log('See what is saved with: node wa_login.js --list')
+    return
+  }
+
+  const paired = await isPaired(dir)
+  const status = paired ? 'paired' : 'not paired'
+  console.log(`Session '${label}' (${status}, ${entries.length} file(s)) will be unlinked and deleted:`)
+  console.log(`  ${dir}`)
+  console.log(
+    'This ends the link on WhatsApp itself: the phone removes this PC from ' +
+      'Linked devices, and this session stops working anywhere it is used.',
+  )
+
+  if (!(await askYes(`Unlink and delete '${label}'? type 'yes': `))) {
+    console.log('Nothing deleted.')
+    return
+  }
+
+  if (paired) {
+    let sock
+    try {
+      sock = await createSocket(dir)
+      await waitForOpen(sock)
+      await sock.logout() // tells the phone this computer is gone
+      console.log('Unlinked this PC on WhatsApp; it is no longer a linked device.')
+    } catch (err) {
+      console.error('Could not unlink this PC on WhatsApp:', err?.message || err)
+      console.error('Nothing deleted; run --logout again, or remove the device on the phone.')
+      process.exitCode = 1
+      return
+    } finally {
+      try {
+        await sock?.end(undefined)
+      } catch {
+        /* the connection may already be gone */
+      }
+    }
+  } else {
+    console.log('This session was not paired; there was no linked device to remove.')
+  }
+
   await rm(dir, { recursive: true, force: true })
   console.log(`Deleted session '${label}'. No credentials were printed.`)
 }
@@ -353,11 +435,17 @@ const isMain = process.argv[1] && pathToFileURL(process.argv[1]).href === import
 if (isMain) {
   try {
     const argv = process.argv.slice(2)
-    if (argv.includes('--list') && (argv.includes('--remove') || argv.some((a) => a.startsWith('--remove=')))) {
-      throw new Error('Use either --list or --remove, not both.')
+    const chosen = ['--list', '--remove', '--logout'].filter(
+      (flag) => argv.includes(flag) || argv.some((a) => a.startsWith(`${flag}=`)),
+    )
+    if (chosen.length > 1) {
+      throw new Error('Use only one of --list, --remove or --logout.')
     }
-    const removeLabel = takeRemove(argv)
-    if (removeLabel) {
+    const logoutLabel = takeOption(argv, '--logout')
+    const removeLabel = takeOption(argv, '--remove')
+    if (logoutLabel) {
+      await logoutSession(logoutLabel)
+    } else if (removeLabel) {
       await removeSession(removeLabel)
     } else if (argv.includes('--list')) {
       await listSessions()
