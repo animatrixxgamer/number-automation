@@ -46,7 +46,13 @@ silently ignored, so this tool never relies on SMS.
 python3 tg_login.py                  # session named after the number
 python3 tg_login.py --session work   # sessions/work.session
 python3 tg_login.py --list           # saved labels and whether each is signed in
+python3 tg_login.py --remove work    # delete sessions/work.session (asks first)
 ```
+
+`--remove` names the session, shows its file and status, and deletes only after
+you type `yes`; no credentials are printed. It forgets the login on this PC only
+— press `l` in the menu (or remove the PC under Telegram → Settings → Devices)
+to end the session for real.
 
 With `--session`, a session that already exists skips the phone prompt; the
 number is only asked for when a fresh code login is needed.
@@ -90,7 +96,13 @@ npm install
 node wa_login.js                 # or: npm run wa:login
 node wa_login.js --session work  # pair a second account, kept apart
 node wa_login.js --list          # saved labels and whether each is still paired
+node wa_login.js --remove work   # delete wa-sessions/work (asks first)
 ```
+
+`--remove` shows the label, path and pairing status, then deletes the directory
+only after you type `yes`; no credentials are printed. It forgets the link on
+this PC only — press `l` in the menu (or remove the device on the phone under
+Linked devices) to unlink the device itself.
 
 ```
 Pair with [q]R code or [p]airing code (default q): p
@@ -123,7 +135,8 @@ node wa_send.js --session work 15551234567 "hello"
 npm run wa:send -- 15551234567 "hello"
 ```
 
-`--list` shows only labels and status — never keys or numbers.
+`--list` shows only labels and status — never keys or numbers. `--remove <label>`
+deletes one saved session after a typed `yes` confirmation.
 
 Credentials live in `wa-sessions/<label>/` (default `wa-sessions/main/`,
 gitignored) and `--session <label>` keeps several of your own accounts apart.

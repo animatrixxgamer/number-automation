@@ -109,9 +109,74 @@ export async function listSessions() {
     console.log(`  ${label.padEnd(width)}  ${status}`)
   }
   console.log(
-    '\nReuse one with --session <label>. Only labels and status are shown; ' +
-      'credentials are never printed.',
+    '\nReuse one with --session <label>, drop one with --remove <label>. Only ' +
+      'labels and status are shown; credentials are never printed.',
   )
+}
+
+/** Pull `--remove <label>` (or `--remove=<label>`) out of argv. */
+function takeRemove(argv) {
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i]
+    if (arg === '--remove') {
+      const label = argv[i + 1]
+      if (!label) throw new Error('--remove needs a label, e.g. --remove work')
+      return label
+    }
+    if (arg.startsWith('--remove=')) {
+      const label = arg.slice('--remove='.length)
+      if (!label) throw new Error('--remove needs a label, e.g. --remove work')
+      return label
+    }
+  }
+  return null
+}
+
+/** Delete one saved session directory, but only after an explicit confirmation. */
+export async function removeSession(label) {
+  const dir = sessionDir(label)
+  let entries
+  try {
+    entries = await readdir(dir)
+  } catch (err) {
+    if (err.code !== 'ENOENT') throw err
+    console.log(`No saved WhatsApp session named '${label}' in ${SESSIONS_ROOT}.`)
+    console.log('See what is saved with: node wa_login.js --list')
+    return
+  }
+
+  const status = (await isPaired(dir)) ? 'paired' : 'not paired'
+  console.log(`Session '${label}' (${status}, ${entries.length} file(s)) will be deleted:`)
+  console.log(`  ${dir}`)
+  console.log(
+    'This only forgets the link on this PC. The phone keeps the linked device ' +
+      'until you remove it there: press "l" in the menu first, or use ' +
+      'WhatsApp -> Linked devices on the phone.',
+  )
+
+  if (!(await askYes(`Delete '${label}'? type 'yes': `))) {
+    console.log('Nothing deleted.')
+    return
+  }
+  await rm(dir, { recursive: true, force: true })
+  console.log(`Deleted session '${label}'. No credentials were printed.`)
+}
+
+/** Ask a yes/no question; end of input counts as "no" instead of hanging. */
+async function askYes(question) {
+  process.stdout.write(question)
+  // terminal: false keeps readline from echoing piped input; the for-await loop
+  // ends cleanly on EOF instead of leaving a promise pending.
+  const rl = readline.createInterface({ input: process.stdin, terminal: false })
+  try {
+    for await (const line of rl) {
+      return line.trim().toLowerCase() === 'yes'
+    }
+    return false
+  } finally {
+    rl.close()
+    process.stdout.write('\n')
+  }
 }
 
 /** Open a socket on an existing session directory (creating it if needed). */
@@ -288,7 +353,13 @@ const isMain = process.argv[1] && pathToFileURL(process.argv[1]).href === import
 if (isMain) {
   try {
     const argv = process.argv.slice(2)
-    if (argv.includes('--list')) {
+    if (argv.includes('--list') && (argv.includes('--remove') || argv.some((a) => a.startsWith('--remove=')))) {
+      throw new Error('Use either --list or --remove, not both.')
+    }
+    const removeLabel = takeRemove(argv)
+    if (removeLabel) {
+      await removeSession(removeLabel)
+    } else if (argv.includes('--list')) {
       await listSessions()
     } else {
       const { session, rest } = takeSession(argv)

@@ -120,10 +120,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="name for this account's session file (default: the phone digits); "
         "use a different label per account, e.g. --session work",
     )
-    parser.add_argument(
+    actions = parser.add_mutually_exclusive_group()
+    actions.add_argument(
         "--list",
         action="store_true",
         help="show the saved session labels and whether each holds a login",
+    )
+    actions.add_argument(
+        "--remove",
+        metavar="LABEL",
+        type=session_label,
+        help="delete one saved session after you confirm; nothing secret is printed",
     )
     return parser.parse_args(argv)
 
@@ -164,10 +171,43 @@ def list_sessions() -> None:
     for path in files:
         print(f"  {path.stem:<{width}}  {session_state(path)}")
     print(
-        "\nReuse one with --session <label>. Only labels and status are shown; "
-        "session keys are never printed. A session revoked from another device "
-        "can still look signed in here until it is used."
+        "\nReuse one with --session <label>, drop one with --remove <label>. "
+        "Only labels and status are shown; session keys are never printed. A "
+        "session revoked from another device can still look signed in here "
+        "until it is used."
     )
+
+
+def remove_session(label: str) -> None:
+    """Delete one saved session, but only after an explicit confirmation."""
+    path = SESSION_DIR / f"{label}.session"
+    journal = Path(f"{path}-journal")
+    # Journal first, so the main file only goes after the sidecar succeeded.
+    files = [item for item in (journal, path) if item.exists()]
+    if not files:
+        print(f"No saved Telegram session named '{label}' in {SESSION_DIR}/.")
+        print("See what is saved with: python3 tg_login.py --list")
+        return
+
+    status = session_state(path) if path.exists() else "leftover journal only"
+    print(f"Session '{label}' ({status}) will be deleted:")
+    for item in files:
+        print(f"  {item}")
+    print(
+        "This only forgets the login on this PC. Telegram keeps the device "
+        "listed until you log it out there: press 'l' in the menu first, or "
+        "remove this PC on the phone under Settings -> Devices."
+    )
+    if prompt(f"Delete '{label}'? type 'yes': ").lower() != "yes":
+        print("Nothing deleted.")
+        return
+
+    for item in files:
+        try:
+            item.unlink()
+        except OSError as exc:
+            sys.exit(f"Could not delete {item}: {exc}")
+    print(f"Deleted session '{label}'. No login data was printed.")
 
 
 def secure_session_file(path: Path) -> None:
@@ -344,6 +384,9 @@ async def main() -> None:
     args = parse_args()
     if args.list:
         list_sessions()
+        return
+    if args.remove:
+        remove_session(args.remove)
         return
 
     api_id, api_hash = get_credentials()
