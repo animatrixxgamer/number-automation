@@ -64,6 +64,38 @@ directory, either `cd` into the checkout or wrap the call:
 (cd /opt/number-automation && node wa_login.js --list)
 ```
 
+### On Termux (Android)
+
+Both tools also run natively on a phone, so the phone itself can be the host — no
+server, no SSH. One thing to know first: on the phone that holds the account you
+cannot scan a QR code shown on the same screen, so log in with a code instead.
+
+```bash
+pkg update && pkg install -y python nodejs git
+git clone https://github.com/animatrixxgamer/number-automation
+cd number-automation
+python -m venv .venv && .venv/bin/pip install -r requirements.txt
+npm install
+cp .env.example .env && nano .env      # fill in TG_API_ID / TG_API_HASH
+termux-wake-lock                       # stops Android killing a half-done login
+```
+
+If `python -m venv` is unavailable in your Termux, install into the prefix
+instead: `pip install --break-system-packages -r requirements.txt` and use
+`python` wherever the commands below say `.venv/bin/python`.
+
+```bash
+.venv/bin/python tg_login.py --session work
+#   [c]ode login: the code arrives in the Telegram app on this same phone
+node wa_login.js --session work
+#   [p]airing code: type the 8 characters under Linked devices -> Link with phone number
+```
+
+Run both from that directory every time, and keep the phone awake while a login
+is in progress. For long QR or pairing sessions, `pkg install tmux`, run
+`tmux new -s login`, and you can lock the screen and come back without losing
+the prompt.
+
 ---
 
 # Telegram — `tg_login.py`
@@ -138,6 +170,20 @@ Signed in as Your Name @username | id 123456789
 Already signed in? The menu offers `s` (send a test message to yourself),
 `l` (log out this PC) or Enter to quit. Delete the session file — or press `l` —
 to forget the login here.
+
+Send a single message later without the menu:
+
+```bash
+python3 tg_send.py --session work @friend "hello"
+python3 tg_send.py --session work +15551234567 "hello"
+python3 tg_send.py +15551234567 "hello"    # the only saved session
+```
+
+The recipient is `@username` or a phone number with country code; with
+`--session` left out it uses your single saved session and refuses to guess
+between several. One recipient and one message per run — run it again for the
+next person. Exit status is 0 on a send and 1 on any failure, and Telegram's
+own errors are named: no such username, invalid number, blocked, spam-limited.
 
 ---
 
